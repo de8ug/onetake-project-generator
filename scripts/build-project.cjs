@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const [input, output] = process.argv.slice(2);
 if (!input || !output) throw new Error("Usage: build-project.cjs <content-plan.json> <output-directory>");
 const plan = JSON.parse(fs.readFileSync(input, "utf8"));
+const inputDir = path.dirname(path.resolve(input));
 const now = Date.now();
 const out = path.resolve(output);
 assert(["talkinghead", "whiteboard"].includes(plan.mode));
@@ -23,13 +24,38 @@ assert.equal(new Set(parts.map(p => p.id)).size, parts.length);
 for (const part of parts) {
   assert(part.text && part.shot && part.seconds >= 5 && part.seconds <= 300);
   assert(!part.verification || ["pending", "own-work", "source-checked", "opinion"].includes(part.verification));
+  assert(!(part.board && part.sourceImage), "Use either a whiteboard diagram or a source image on one page");
+  assert(!(plan.mode === "talkinghead" && part.quote && part.sourceImage), "Use one visible cue per talking-head segment");
 }
+const loadSourceImage = (media) => {
+  assert(media && typeof media.file === "string" && media.file.startsWith("assets/"), "Source image must live under the plan's assets/ directory");
+  const absolute = path.resolve(inputDir, media.file);
+  assert(absolute.startsWith(path.join(inputDir, "assets") + path.sep), "Source image path escapes assets/");
+  assert(fs.realpathSync(absolute).startsWith(fs.realpathSync(path.join(inputDir, "assets")) + path.sep), "Source image symlink escapes assets/");
+  assert(typeof media.credit === "string" && media.credit.trim(), "Source image needs an attribution");
+  assert(typeof media.sourceUrl === "string" && new URL(media.sourceUrl).protocol === "https:", "Source image needs an HTTPS source URL");
+  const bytes = fs.readFileSync(absolute);
+  assert(bytes.length > 0 && bytes.length < 3_500_000, "Source image must be smaller than 3.5 MB");
+  const ext = path.extname(absolute).toLowerCase();
+  const mimeType = ext === ".png" ? "image/png" : [".jpg", ".jpeg"].includes(ext) ? "image/jpeg" : ext === ".webp" ? "image/webp" : null;
+  assert(mimeType, "Source image must be PNG, JPEG, or WebP");
+  assert(mimeType !== "image/png" || bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")), "Invalid PNG data");
+  assert(mimeType !== "image/jpeg" || bytes.subarray(0, 3).equals(Buffer.from("ffd8ff", "hex")), "Invalid JPEG data");
+  assert(mimeType !== "image/webp" || (bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP"), "Invalid WebP data");
+  return { ...media, absolute, mimeType, dataURL: `data:${mimeType};base64,${bytes.toString("base64")}` };
+};
 let project;
 if (plan.mode === "talkinghead") {
   assert(parts.length <= 12);
   const assets = [];
   const segments = parts.map((part, i) => {
     const cues = [];
+    if (part.sourceImage) {
+      const media = loadSourceImage(part.sourceImage);
+      const id = `image-${part.id}`;
+      assets.push({ id, type: "image", title: media.credit, imageDataUrl: media.dataURL, source: "upload", cueText: media.sourceUrl });
+      cues.push({ id: `cue-image-${part.id}`, assetId: id, atProgress: 0, durationSeconds: Math.min(8, part.seconds) });
+    }
     if (part.quote) {
       assert(part.quote.length <= 200);
       assert(!part.emphasis || (part.emphasis.length <= 40 && part.quote.includes(part.emphasis)));
@@ -62,6 +88,7 @@ if (plan.mode === "talkinghead") {
   assert(parts[0].id === "intro");
   const rectangle = template.scenes[0].elements.find(e => e.type === "rectangle");
   const text = template.scenes[0].elements.find(e => e.type === "text");
+  const files = {};
   assert(rectangle && text);
   const rect = (id, x, y, width, height, color) => ({ ...rectangle, id, x, y, width, height, strokeColor: color, backgroundColor: color });
   const label = (id, value, x, y, width, fontSize, color = "#17232D") => ({ ...text, id, x, y, width, height: value.split("\n").length * fontSize * 1.25, text: value, originalText: value, fontFamily: 2, fontSize, baseline: fontSize, strokeColor: color, textAlign: "left" });
@@ -108,6 +135,19 @@ if (plan.mode === "talkinghead") {
         });
       } else throw new Error(`Unknown diagram in ${part.id}`);
       if (b.footer) elements.push(label(`${part.id}-footer`, b.footer, 48, split ? 562 : 860, 624, 24, "#52616B"));
+    } else if (part.sourceImage) {
+      assert(part.camera === "board-pip", "A source screenshot page uses board-pip presentation");
+      const media = loadSourceImage(part.sourceImage);
+      assert(Number.isFinite(media.width) && media.width > 0 && Number.isFinite(media.height) && media.height > 0, "Whiteboard source images need width and height");
+      const fileId = `source-${part.id}`;
+      files[fileId] = { id: fileId, mimeType: media.mimeType, dataURL: media.dataURL, created: now };
+      const height = Math.min(500, Math.round(624 * media.height / media.width));
+      const width = Math.round(height * media.width / media.height);
+      elements.push(label(`${part.id}-kicker`, "来源资料", 48, 52, 624, 28, "#325A70"));
+      elements.push(label(`${part.id}-heading`, part.name, 48, 116, 624, 50));
+      elements.push(rect(`${part.id}-accent`, 48, 232, 580, 10, "#F2C94C"));
+      elements.push({ ...rectangle, id: `${part.id}-source-image`, type: "image", fileId, status: "saved", scale: [1, 1], x: Math.round((720 - width) / 2), y: 278, width, height, strokeColor: "transparent", backgroundColor: "transparent", roundness: null });
+      elements.push(label(`${part.id}-credit`, `来源：${media.credit}`, 48, 810, 624, 25, "#52616B"));
     } else assert(part.camera === "camera-full");
     assert(elements.length < 36);
     scenes.push(scene(part, elements));
@@ -116,30 +156,87 @@ if (plan.mode === "talkinghead") {
   const actions = scenes.map(s => { const action = { type: "scene.show", atMs, target: { kind: "page", sceneId: s.id } }; atMs += s.durationHintMs; return action; });
   project = {
     ...template, title: plan.title, savedAt: now,
-    metadata: { title: plan.title, createdAt: now, updatedAt: now, coverSceneId: "cover" }, scenes, currentSceneId: "intro", files: {},
+    metadata: { title: plan.title, createdAt: now, updatedAt: now, coverSceneId: "cover" }, scenes, currentSceneId: "intro", files,
     beautySettings: { ...template.beautySettings, aspectRatio: "9:16" },
     script: { language: "zh", title: plan.title, content: parts.map(p => p.text).join("\n\n") },
     directorPlan: { version: 1, durationMs: atMs, actions, subtitleCues: [], autoStartOnRecording: false },
   };
 }
 fs.mkdirSync(out, { recursive: true });
+for (const part of parts) {
+  if (!part.sourceImage) continue;
+  const media = loadSourceImage(part.sourceImage);
+  const destination = path.join(out, media.file);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  if (path.resolve(media.absolute) !== path.resolve(destination)) fs.copyFileSync(media.absolute, destination);
+}
 fs.writeFileSync(path.join(out, "project.onetake.json"), JSON.stringify(project, null, 2));
 if (path.resolve(input) !== path.join(out, "content-plan.json")) fs.copyFileSync(input, path.join(out, "content-plan.json"));
 const duration = parts.reduce((sum, p) => sum + p.seconds, 0);
 fs.writeFileSync(path.join(out, "录制稿与分镜.md"), [
   `# ${plan.title}`, "", `观众：${plan.audience}`, `核心观点：${plan.corePoint}`, `参考口播：${duration} 秒。默认手动分段/切页；时长仅用于准备，不限制临场发挥。`,
   "", `封面大字：\n\n${plan.coverTitle}`, `\n封面小字：${plan.coverSubtitle}`,
-  "", ...parts.map((p, i) => `## ${i + 1}. ${p.name || p.role}\n\n参考 ${p.seconds} 秒；镜头：${p.camera || "真人"}。\n\n${p.text}\n\n画面：${p.shot}${p.quote ? `\n\n金句：${p.quote}；黄字重点：${p.emphasis || "无"}。` : ""}`),
+  "", ...parts.map((p, i) => `## ${i + 1}. ${p.name || p.role}\n\n参考 ${p.seconds} 秒；镜头：${p.camera || "真人"}。\n\n${p.text}\n\n画面：${p.shot}${p.sourceImage ? `\n\n来源图：${p.sourceImage.file}；署名：${p.sourceImage.credit}；原文：${p.sourceImage.sourceUrl}。` : ""}${p.quote ? `\n\n金句：${p.quote}；黄字重点：${p.emphasis || "无"}。` : ""}`),
   "", "## 录制前确认", "", "先通读并换成自己平时会说的词；只在确认过的地方使用第一人称经历。工程不会识别说到哪个词。手动停顿后继续，最后由本人停止。金句按意义段出现，不是自动逐字字幕。",
   "白板工程仅供网页白板导入；口播工程可供网页与当前手机口播导入。提词器不入成片。封面和发布词仍要在录后确认；白板发布词以及口播封面文案见配套文件。",
   "", "## 内容复核", "", ...(plan.review || []).map(r => `- ${r}`), "",
 ].join("\n\n"));
 fs.writeFileSync(path.join(out, "发布词.md"), `# ${plan.title}\n\n${plan.publication.description}\n\n关键词：${plan.publication.keywords.join("、")}。\n\n封面大字：\n\n${plan.coverTitle}\n\n封面小字：${plan.coverSubtitle}\n\n发布前由本人确认；未自动发布。\n`);
-fs.writeFileSync(path.join(out, "来源与核验.md"), `# 来源与边界\n\n${plan.sourceNotes.map(s => `- ${s}`).join("\n")}\n\n发布前需人工核对事实、截图与图片授权，并检查是否含第三方肖像、私人录音、未成年人资料、账户或密钥。示意图不代表实测结果。${plan.productMention === "none" ? "本条不植入产品宣传；工程使用工具不等于口播必须推荐工具。" : "若提到 OneTake，应确认口播中的功能与当前版本一致。"}\n\n当前状态：稿件与工程待本人试录；未证明观看效果，未录制、未导出、未发布。\n`);
+fs.writeFileSync(path.join(out, "来源与核验.md"), `# 来源与边界\n\n${plan.sourceNotes.map(s => `- ${s}`).join("\n")}\n\n${parts.filter(p => p.sourceImage).map(p => `- 第 ${parts.indexOf(p) + 1} 段来源图：${p.sourceImage.credit}；${p.sourceImage.sourceUrl}；文件 ${p.sourceImage.file}。仅作为来源说明，发布前确认截图与配图转载授权。`).join("\n")}\n\n发布前需人工核对事实、截图与图片授权，并检查是否含第三方肖像、私人录音、未成年人资料、账户或密钥。示意图不代表实测结果。${plan.productMention === "none" ? "本条不植入产品宣传；工程使用工具不等于口播必须推荐工具。" : "若提到 OneTake，应确认口播中的功能与当前版本一致。"}\n\n当前状态：稿件与工程待本人试录；未证明观看效果，未录制、未导出、未发布。\n`);
 const escaped = JSON.stringify({ project, plan }).replace(/</g, "\\u003c");
 const htmlTitle = plan.title.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 fs.writeFileSync(path.join(out, "preview.html"), `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlTitle}</title>
-<style>*{box-sizing:border-box}body{margin:0;background:#eef1f3;color:#17232d;font-family:Arial,"PingFang SC",sans-serif}main{max-width:1100px;margin:auto;padding:20px;display:grid;grid-template-columns:minmax(240px,400px) minmax(280px,1fr);gap:28px}#frame{position:relative;aspect-ratio:9/16;overflow:hidden;background:#fafaf7}#board{position:absolute;width:720px;height:1280px;transform-origin:0 0}.el{position:absolute;white-space:pre;line-height:1.25;letter-spacing:0}.camera{position:absolute;background:#d9e3e8;color:#325a70;display:grid;place-items:center}.full{inset:0}.split{left:0;right:0;bottom:0;height:50%}.pip{right:4%;bottom:4%;width:24%;aspect-ratio:1;border-radius:50%;font-size:12px}#quote{position:absolute;left:6%;right:6%;bottom:24%;text-align:center;white-space:pre-line;background:#17232d;color:white;padding:12px;font-size:22px}mark{color:#ffdf4d;background:none}button{font-size:22px;width:44px;height:40px;border:1px solid #9dadb6;background:white;border-radius:4px;cursor:pointer}button:disabled{opacity:.35}nav{display:flex;gap:12px;align-items:center}select{width:100%;padding:10px;font-size:16px;margin:16px 0}p{line-height:1.9}h1{font-size:24px}h2{font-size:20px}.note{font-size:14px;color:#52616b}@media(max-width:680px){main{grid-template-columns:1fr;max-width:430px;padding:12px}}</style>
-<main><section><div id="frame"><div id="board"></div><div id="camera" class="camera"></div><div id="quote" hidden></div></div></section><section><h1 id="title"></h1><nav><button id="prev" aria-label="上一段">←</button><span id="count"></span><button id="next" aria-label="下一段">→</button></nav><select id="pages" aria-label="选择段落"></select><h2 id="name"></h2><p id="script"></p><p id="shot" class="note"></p><p class="note">分镜排练：不启用摄像头，不是实录成片。最终样式以 OneTake 内的预览为准。</p><a href="project.onetake.json" download>下载工程</a></section></main>
-<script>const data=${escaped};let i=0;const p=data.project,plan=data.plan,parts=p.mode==='whiteboard'?p.scenes:plan.segments,board=document.getElementById('board'),frame=document.getElementById('frame'),camera=document.getElementById('camera'),quote=document.getElementById('quote'),select=document.getElementById('pages');document.getElementById('title').textContent=plan.title;parts.forEach((s,n)=>{const o=document.createElement('option');o.value=n;o.textContent=(n+1)+' / '+(s.name||s.role);select.append(o)});function resize(){board.style.transform='scale('+frame.clientWidth/720+')'}function show(){const s=parts[i];board.replaceChildren();quote.replaceChildren();quote.hidden=true;camera.hidden=false;if(p.mode==='whiteboard'){for(const e of s.elements){const el=document.createElement('div');el.className='el';Object.assign(el.style,{left:e.x+'px',top:e.y+'px',width:e.width+'px',height:e.height+'px'});if(e.type==='text'){el.textContent=e.text;el.style.fontSize=e.fontSize+'px';el.style.color=e.strokeColor}else{el.style.background=e.backgroundColor}board.append(el)}camera.className='camera '+(s.cameraPresentation==='split'?'split':s.cameraPresentation==='camera-full'?'full':'pip');camera.hidden=s.id==='cover'}else{camera.className='camera full';if(s.quote){quote.hidden=false;const emphasis=s.emphasis||'';if(emphasis&&s.quote.includes(emphasis)){const at=s.quote.indexOf(emphasis);quote.append(document.createTextNode(s.quote.slice(0,at)));const mark=document.createElement('mark');mark.textContent=emphasis;quote.append(mark,document.createTextNode(s.quote.slice(at+emphasis.length)))}else quote.textContent=s.quote}}camera.textContent='本人镜头占位';document.getElementById('name').textContent=s.name||s.role;document.getElementById('script').textContent=s.narration||s.text;document.getElementById('shot').textContent=s.notes||s.shot;document.getElementById('count').textContent=(i+1)+' / '+parts.length;select.value=i;document.getElementById('prev').disabled=i===0;document.getElementById('next').disabled=i===parts.length-1;resize()}document.getElementById('prev').onclick=()=>{i--;show()};document.getElementById('next').onclick=()=>{i++;show()};select.onchange=()=>{i=Number(select.value);show()};new ResizeObserver(resize).observe(frame);show();</script></html>`);
+<style>*{box-sizing:border-box}body{margin:0;background:#eef1f3;color:#17232d;font-family:Arial,"PingFang SC",sans-serif}main{max-width:1100px;margin:auto;padding:20px;display:grid;grid-template-columns:minmax(240px,400px) minmax(280px,1fr);gap:28px}#frame{position:relative;aspect-ratio:9/16;overflow:hidden;background:#fafaf7}#board{position:absolute;width:720px;height:1280px;transform-origin:0 0}.el{position:absolute;white-space:pre;line-height:1.25;letter-spacing:0}.camera{position:absolute;background:#d9e3e8;color:#325a70;display:grid;place-items:center}.full{inset:0}.split{left:0;right:0;bottom:0;height:50%}.pip{right:4%;bottom:4%;width:24%;aspect-ratio:1;border-radius:50%;font-size:12px}#source-image{position:absolute;left:0;bottom:0;width:100%;height:42%;object-fit:contain;background:#17232d}#quote{position:absolute;left:6%;right:6%;bottom:24%;text-align:center;white-space:pre-line;background:#17232d;color:white;padding:12px;font-size:22px}mark{color:#ffdf4d;background:none}button{font-size:22px;width:44px;height:40px;border:1px solid #9dadb6;background:white;border-radius:4px;cursor:pointer}button:disabled{opacity:.35}nav{display:flex;gap:12px;align-items:center}select{width:100%;padding:10px;font-size:16px;margin:16px 0}p{line-height:1.9}h1{font-size:24px}h2{font-size:20px}.note{font-size:14px;color:#52616b}@media(max-width:680px){main{grid-template-columns:1fr;max-width:430px;padding:12px}}</style>
+<main><section><div id="frame"><div id="board"></div><div id="camera" class="camera"></div><img id="source-image" alt="来源资料" hidden><div id="quote" hidden></div></div></section><section><h1 id="title"></h1><nav><button id="prev" aria-label="上一段">←</button><span id="count"></span><button id="next" aria-label="下一段">→</button></nav><select id="pages" aria-label="选择段落"></select><h2 id="name"></h2><p id="script"></p><p id="shot" class="note"></p><p class="note">分镜排练：不启用摄像头，不是实录成片。最终样式以 OneTake 内的预览为准。</p><a href="project.onetake.json" download>下载工程</a></section></main>
+<script>
+const data=${escaped};
+let i=0;
+const p=data.project,plan=data.plan,parts=p.mode==='whiteboard'?p.scenes:plan.segments;
+const requested=Number(new URLSearchParams(location.search).get('page'));
+if(Number.isInteger(requested)&&requested>=1&&requested<=parts.length)i=requested-1;
+const board=document.getElementById('board'),frame=document.getElementById('frame');
+const camera=document.getElementById('camera'),quote=document.getElementById('quote');
+const sourceImage=document.getElementById('source-image'),select=document.getElementById('pages');
+document.getElementById('title').textContent=plan.title;
+parts.forEach((s,n)=>{const o=document.createElement('option');o.value=n;o.textContent=(n+1)+' / '+(s.name||s.role);select.append(o)});
+function resize(){board.style.transform='scale('+frame.clientWidth/720+')'}
+function show(){
+  const s=parts[i];board.replaceChildren();quote.replaceChildren();quote.hidden=true;sourceImage.hidden=true;camera.hidden=false;
+  if(p.mode==='whiteboard'){
+    for(const e of s.elements){
+      const el=document.createElement('div');el.className='el';
+      Object.assign(el.style,{left:e.x+'px',top:e.y+'px',width:e.width+'px',height:e.height+'px'});
+      if(e.type==='text'){el.textContent=e.text;el.style.fontSize=e.fontSize+'px';el.style.color=e.strokeColor}
+      else if(e.type==='image'){
+        const img=document.createElement('img');img.src=p.files[e.fileId]?.dataURL||'';img.alt='来源资料';
+        Object.assign(img.style,{width:'100%',height:'100%',objectFit:'contain'});el.append(img);
+      }else el.style.background=e.backgroundColor;
+      board.append(el);
+    }
+    camera.className='camera '+(s.cameraPresentation==='split'?'split':s.cameraPresentation==='camera-full'?'full':'pip');
+    camera.hidden=s.id==='cover';
+  }else{
+    camera.className='camera full';
+    if(s.sourceImage){const asset=p.talkingHead.brollAssets.find(a=>a.id==='image-'+s.id);if(asset){sourceImage.src=asset.imageDataUrl;sourceImage.hidden=false}}
+    if(s.quote){
+      quote.hidden=false;const emphasis=s.emphasis||'';
+      if(emphasis&&s.quote.includes(emphasis)){
+        const at=s.quote.indexOf(emphasis);quote.append(document.createTextNode(s.quote.slice(0,at)));
+        const mark=document.createElement('mark');mark.textContent=emphasis;
+        quote.append(mark,document.createTextNode(s.quote.slice(at+emphasis.length)));
+      }else quote.textContent=s.quote;
+    }
+  }
+  camera.textContent='本人镜头占位';
+  document.getElementById('name').textContent=s.name||s.role;
+  document.getElementById('script').textContent=s.narration||s.text;
+  document.getElementById('shot').textContent=s.notes||s.shot;
+  document.getElementById('count').textContent=(i+1)+' / '+parts.length;
+  select.value=i;document.getElementById('prev').disabled=i===0;document.getElementById('next').disabled=i===parts.length-1;resize();
+}
+document.getElementById('prev').onclick=()=>{i--;show()};
+document.getElementById('next').onclick=()=>{i++;show()};
+select.onchange=()=>{i=Number(select.value);show()};
+new ResizeObserver(resize).observe(frame);show();
+</script></html>`);
 console.log(JSON.stringify({ mode: plan.mode, title: plan.title, parts: parts.length, seconds: duration, project: path.join(out, "project.onetake.json") }));

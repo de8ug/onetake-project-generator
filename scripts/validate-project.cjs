@@ -25,6 +25,9 @@ if (project.mode === "talkinghead") {
   assert(Array.isArray(assets));
   assert.equal(new Set(segments.map(s => s.id)).size, segments.length, "Duplicate segment IDs");
   assert.equal(new Set(assets.map(a => a.id)).size, assets.length, "Duplicate asset IDs");
+  for (const asset of assets) {
+    if (asset.type === "image") assert(/^data:image\/(png|jpeg|webp);base64,/.test(asset.imageDataUrl) && asset.imageDataUrl.length < 5_000_000, `Invalid embedded image ${asset.id}`);
+  }
   const assetIds = new Set(assets.map(a => a.id));
   const language = state.activeLanguage || "zh";
   const spoken = segments.map(s => {
@@ -61,7 +64,11 @@ if (project.mode === "talkinghead") {
     for (const element of scene.elements) {
       assert(element.x >= background.x && element.y >= background.y && element.x + element.width <= background.x + background.width && element.y + element.height <= background.y + background.height, `Out-of-page element ${scene.id}/${element.id}`);
       if (scene.cameraPresentation === "split" && element !== background) assert(element.y + element.height <= background.y + background.height / 2, `Split content crosses midpoint: ${element.id}`);
-      if (element.type === "image") assert(element.fileId && project.files?.[element.fileId], `Missing image file ${element.id}`);
+      if (element.type === "image") {
+        const file = project.files?.[element.fileId];
+        assert(file && file.id === element.fileId, `Missing image file ${element.id}`);
+        assert(/^data:image\/(png|jpeg|webp);base64,/.test(file.dataURL), `Invalid embedded image ${element.id}`);
+      }
     }
   }
   if (production) {

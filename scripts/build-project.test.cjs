@@ -12,11 +12,17 @@ const common = {
   publication: { description: "不发布的合成测试", keywords: ["测试一", "测试二", "测试三", "测试四"] },
   sourceNotes: ["Synthetic test; no private material."], review: ["仅测试工程格式。"],
 };
-function run(plan, check) {
+const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9XQhEAAAAASUVORK5CYII=", "base64");
+const sourceImage = { file: "assets/source.png", credit: "Synthetic source", sourceUrl: "https://example.com/original", width: 1, height: 1 };
+function run(plan, check, withImage = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "onetake-skill-test-"));
   try {
     const input = path.join(dir, "brief.json");
     fs.writeFileSync(input, JSON.stringify(plan));
+    if (withImage) {
+      fs.mkdirSync(path.join(dir, "assets"));
+      fs.writeFileSync(path.join(dir, "assets", "source.png"), pixel);
+    }
     const output = path.join(dir, "output");
     const result = spawnSync(process.execPath, [build, input, output], { encoding: "utf8" });
     check({ result, output });
@@ -69,4 +75,29 @@ test("rejects highlight that is not part of quote", () => {
 test("rejects duplicate segment identities", () => {
   const part = { id: "same", role: "开场", text: "测试。", seconds: 10, shot: "占位。" };
   run({ ...common, mode: "talkinghead", segments: [part, part] }, ({ result }) => assert.notEqual(result.status, 0));
+});
+test("talking-head source image is embedded and copied with a segment-start cue", () => {
+  run({ ...common, mode: "talkinghead", segments: [
+    { id: "intro", role: "开场", text: "这是合成来源图测试。", seconds: 10, shot: "真人占位。", sourceImage },
+  ] }, ({ result, output }) => {
+    assert.equal(result.status, 0, result.stderr);
+    const p = importCheck(output, true);
+    const asset = p.talkingHead.brollAssets[0];
+    assert.equal(asset.type, "image");
+    assert(asset.imageDataUrl.startsWith("data:image/png;base64,"));
+    assert.equal(p.talkingHead.directorPlan.segments[0].cues[0].assetId, asset.id);
+    assert(fs.existsSync(path.join(output, "assets", "source.png")));
+  }, true);
+});
+test("whiteboard source page embeds a referenced image file", () => {
+  run({ ...common, mode: "whiteboard", pages: [
+    { id: "intro", name: "开场", camera: "camera-full", text: "合成开场。", seconds: 10, shot: "真人占位。" },
+    { id: "source", name: "来源", camera: "board-pip", text: "这是合成来源图。", seconds: 10, shot: "来源页占位。", sourceImage },
+  ] }, ({ result, output }) => {
+    assert.equal(result.status, 0, result.stderr);
+    const p = importCheck(output, false);
+    const element = p.scenes[2].elements.find(e => e.type === "image");
+    assert(element);
+    assert(p.files[element.fileId].dataURL.startsWith("data:image/png;base64,"));
+  }, true);
 });

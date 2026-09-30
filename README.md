@@ -23,6 +23,6 @@ For Codex, install the Skill by linking this directory under the local skills di
 node --test scripts/build-project.test.cjs
 ```
 
-`contracts/` contains synthetic format templates, not user footage or private content. The generated `来源与核验.md` is a review checklist, not a certification. Check claims, image rights, personal data, and compatibility before publication.
+`contracts/` contains synthetic format templates, not user footage or private content. A reviewed image in a plan's `assets/` directory can be embedded through `sourceImage` on a talking-head segment or a dedicated whiteboard source page. The generated `来源与核验.md` is a review checklist, not a certification. Check claims, image rights, personal data, and compatibility before publication.
 
 This repository has no bundled user recordings, accounts, keys, or model credentials. It is not connected to a GitHub remote by default.
