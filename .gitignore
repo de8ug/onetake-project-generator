@@ -2,3 +2,11 @@ node_modules/
 .DS_Store
 output/
 *.log
+.env
+*.env
+*.mp4
+*.mov
+*.webm
+project.onetake.json
+content-plan.json
+publishing-bundle.zip
