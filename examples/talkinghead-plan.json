@@ -1,0 +1,18 @@
+{
+  "mode": "talkinghead",
+  "title": "示例：把问题讲清楚",
+  "audience": "准备录制讲解视频的人",
+  "corePoint": "先展示一个具体问题，再解释自己的判断。",
+  "coverTitle": "先讲问题\n再讲方法",
+  "coverSubtitle": "可编辑的合成示例",
+  "productMention": "none",
+  "publication": {
+    "description": "这是一个用于验证工程格式的合成示例，不是待发布的视频。",
+    "keywords": ["口播", "结构", "示例", "验证"]
+  },
+  "sourceNotes": ["Synthetic example; no real person, result, or third-party asset."],
+  "segments": [
+    { "id": "intro", "role": "提问", "text": "有时候一个问题讲不清，不是因为内容少，而是开头没有说清楚问题是什么。", "seconds": 12, "shot": "真人镜头占位。" },
+    { "id": "answer", "role": "方法", "text": "先给观众一个具体的情境，再说自己的判断，最后让观众知道下一步能怎么做。", "seconds": 14, "shot": "真人镜头占位。", "quote": "先说问题，再说判断", "emphasis": "判断" }
+  ]
+}

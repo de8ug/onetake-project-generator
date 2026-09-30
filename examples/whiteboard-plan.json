@@ -1,0 +1,18 @@
+{
+  "mode": "whiteboard",
+  "title": "示例：讲解三步法",
+  "audience": "准备录制讲解视频的人",
+  "corePoint": "一个白板页面只承担一个解释任务。",
+  "coverTitle": "讲清一个问题\n只要三步",
+  "coverSubtitle": "可编辑的合成示例",
+  "productMention": "none",
+  "publication": {
+    "description": "这是一个用于验证工程格式的合成示例，不是待发布的视频。",
+    "keywords": ["白板", "讲解", "示例", "验证"]
+  },
+  "sourceNotes": ["Synthetic example; no real person, result, or third-party asset."],
+  "pages": [
+    { "id": "intro", "name": "真人开场", "camera": "camera-full", "text": "今天用一个合成例子，看看怎样把一个问题讲清楚。", "seconds": 10, "shot": "真人镜头占位。" },
+    { "id": "steps", "name": "三步讲解", "camera": "split", "text": "先说问题，再展示证据，最后给出可以尝试的步骤。", "seconds": 15, "shot": "上方白板，下方真人。", "board": { "kicker": "讲解顺序", "headline": "一个页面\n只讲一件事", "diagram": "flow", "items": ["问题", "证据", "下一步"], "footer": "合成示例" } }
+  ]
+}
