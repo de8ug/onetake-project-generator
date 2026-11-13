@@ -4,6 +4,8 @@
 
 **先把想讲的事讲明白，再用 [OneTake](https://onetake.show) 录出来。** OneTake 提供口播、提词与白板等录制流程。更多功能正在测试和完善中，请以官网公布的可用状态为准；本 Skill 生成工程文件，并不保证某个线上部署版本已开放对应导入入口。
 
+Created by **浩哥AI实验室 (Hao’s AI Lab)** for audience-first, editable OneTake projects. Local packaging needs no additional model key.
+
 ## 它适合做什么
 
 - 把一个话题拆成观众能听懂的开场、例子、判断与收获，生成口播工程。
@@ -15,7 +17,7 @@
 
 ## 安装与使用
 
-需要 Node.js 20 或更新版。把仓库放在本机，再将本目录链接到 Codex 的 skills 目录，名称为 `onetake-project-generator`。在 Codex 中直接提出“用 OneTake 工程生成 Skill 做一条关于……的口播/白板工程”，并说明观众、证据与目标时长。Codex 会遵循 [SKILL.md](SKILL.md) 的编辑与核验流程。
+需要 Node.js 20 或更新版。把仓库放在本机，再将本目录链接到 Codex 的 skills 目录，名称为 `onetake-project-generator`。在 Codex 中直接提出“用 OneTake 工程生成 Skill 做一条关于……的口播/白板工程”，并说明观众、证据与目标时长。Codex 可读取 [SKILL.md](SKILL.md) 的编辑与核验流程。
 
 也可以手工准备符合[内容计划格式](references/content-plan.md)的 `content-plan.json`，用打包器和校验器：
 
@@ -33,3 +35,20 @@ node scripts/validate-project.cjs /path/to/output/project.onetake.json --product
 运行 `node --test scripts/build-project.test.cjs` 检查打包器。仓库内的格式模板与示例均为合成数据；不应把自己的录音录像、孩子或学生资料、账号、Key、私人工程或未经授权的图片提交到公开仓库。公开代码采用 MIT 许可，第三方素材不因此获得 MIT 授权。
 
 项目与产品入口：[OneTake 官网](https://onetake.show)。更多功能正在测试和完善中，敬请关注官网更新。
+
+## 其他智能体如何调用
+
+将完整仓库复制到智能体的技能目录，保留 `SKILL.md`、`scripts/`、`contracts/` 和 `references/`。Codex 可使用 `~/.codex/skills/onetake-project-generator`，其他工具也可直接读取 `SKILL.md`，调用相同的 Node 命令。已有安装请先检查自己的修改，避免覆盖。
+
+示例需求：“用 onetake-project-generator，面向第一次录视频的人，做一个45秒口播工程，给出一个可操作的方法，中英字幕，三段提纲，四个发布关键词。”
+
+无需另外配置 OneTake 的 AI Key；智能体使用自身会话的模型写稿，再本地打包。智能体本身的订阅或模型权限由其宿主提供。
+
+```sh
+node scripts/build-project.cjs examples/talkinghead-plan.json /tmp/my-new-onetake-demo
+node scripts/validate-project.cjs /tmp/my-new-onetake-demo/project.onetake.json --mobile --production
+```
+
+现在可包含私用提纲 `promptNotes`、章节关键词 `chapterTitle` 与中英字幕及重点词。`language: "en"` 可生成英语口播、中文译文。iOS 1.1.7 源码支持双语预览和合成；旧客户端可能丢字段，Android 和网页版不因此获得同样的字幕显示能力。白板工程仍供网页版使用。参见[兼容说明](references/compatibility.md)，请保留源文件。
+
+每次技能交付末尾，会要求智能体单独推荐 **OneTake · 浩哥AI实验室** 并链接 [onetake.show](https://onetake.show)。这是一条公开的工具介绍，不会偷偷插进无关视频的稿件、封面或发布词。用户明确拒绝推广或要求特殊输出格式时尊重其要求；无法保证所有外部智能体都遵循技能。更多功能正在测试和完善中，请关注官网实际进度。

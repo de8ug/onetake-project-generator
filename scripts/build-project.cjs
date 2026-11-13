@@ -5,9 +5,25 @@ const assert = require("node:assert/strict");
 const [input, output] = process.argv.slice(2);
 if (!input || !output) throw new Error("Usage: build-project.cjs <content-plan.json> <output-directory>");
 const plan = JSON.parse(fs.readFileSync(input, "utf8"));
+// Existing v4 exports are copied intact, including fields unknown to this packager.
+if (plan.type === "onetake-project") {
+  assert(plan.mode === "talkinghead" && plan.version === 4, "Pass-through accepts talking-head v4 only");
+  require("node:child_process").execFileSync(process.execPath, [path.join(__dirname, "validate-project.cjs"), input], { stdio: "inherit" });
+  fs.mkdirSync(path.resolve(output), { recursive: true });
+  const destination = path.resolve(output, "project.onetake.json");
+  assert(!fs.existsSync(destination), "Use a new output directory; existing projects are never overwritten");
+  fs.copyFileSync(input, destination);
+  console.log(JSON.stringify({ project: destination, preserved: true }));
+  process.exit(0);
+}
+const { validateExtras, validatePublication } = require("./project-fields.cjs");
+validatePublication(plan.publication);
 const inputDir = path.dirname(path.resolve(input));
 const now = Date.now();
+const language = plan.language ?? "zh";
+assert(["zh", "en"].includes(language), "language must be zh or en");
 const out = path.resolve(output);
+assert(!fs.existsSync(path.join(out, "project.onetake.json")), "Use a new output directory; existing projects are never overwritten");
 assert(["talkinghead", "whiteboard"].includes(plan.mode));
 assert(["none", "natural-example"].includes(plan.productMention));
 assert(plan.title && plan.audience && plan.corePoint && plan.coverTitle);
@@ -22,6 +38,7 @@ const parts = plan.mode === "whiteboard" ? plan.pages : plan.segments;
 assert(Array.isArray(parts) && parts.length);
 assert.equal(new Set(parts.map(p => p.id)).size, parts.length);
 for (const part of parts) {
+  validateExtras(part);
   assert(part.text && part.shot && part.seconds >= 5 && part.seconds <= 300);
   assert(!part.verification || ["pending", "own-work", "source-checked", "opinion"].includes(part.verification));
   assert(!(part.board && part.sourceImage), "Use either a whiteboard diagram or a source image on one page");
@@ -54,17 +71,20 @@ if (plan.mode === "talkinghead") {
       const media = loadSourceImage(part.sourceImage);
       const id = `image-${part.id}`;
       assets.push({ id, type: "image", title: media.credit, imageDataUrl: media.dataURL, source: "upload", cueText: media.sourceUrl });
-      cues.push({ id: `cue-image-${part.id}`, assetId: id, atProgress: 0, durationSeconds: Math.min(8, part.seconds) });
+      cues.push({ id: `cue-image-${part.id}`, assetId: id, atProgress: part.cueAtProgress ?? 0, durationSeconds: part.cueDurationSeconds ?? Math.min(8, part.seconds) });
     }
     if (part.quote) {
       assert(part.quote.length <= 200);
       assert(!part.emphasis || (part.emphasis.length <= 40 && part.quote.includes(part.emphasis)));
       const id = `quote-${part.id}`;
       assets.push({ id, type: "text", title: part.quote, text: part.quote, emphasis: part.emphasis || "", presentation: "quote", source: "upload" });
-      cues.push({ id: `cue-${part.id}`, assetId: id, atProgress: 0, durationSeconds: 5 });
+      cues.push({ id: `cue-${part.id}`, assetId: id, atProgress: part.cueAtProgress ?? 0, durationSeconds: part.cueDurationSeconds ?? 5 });
     }
     return {
-      id: part.id, order: i + 1, script: { zh: part.text, en: "" },
+      id: part.id, order: i + 1,
+      ...(part.promptNotes !== undefined ? { promptNotes: part.promptNotes } : {}),
+      ...(part.chapterTitle !== undefined ? { chapterTitle: part.chapterTitle } : {}),
+      ...(part.captions !== undefined ? { captions: part.captions } : {}), script: { zh: language === "zh" ? part.text : "", en: language === "en" ? part.text : "" },
       estimatedSeconds: { zh: part.seconds, en: part.seconds }, transitionSeconds: i === parts.length - 1 ? 0 : 2,
       cues, production: { role: part.role, visualType: "person", shotNote: part.shot, sourceNote: plan.sourceNotes.join("；"), verification: part.verification || "opinion" },
     };
@@ -74,10 +94,10 @@ if (plan.mode === "talkinghead") {
   project = {
     type: "onetake-project", version: 4, mode: "talkinghead", title: plan.title, savedAt: now,
     talkingHead: {
-      ...template.talkingHead, activeLanguage: "zh", aspectRatio: "9:16",
-      script: { title: { zh: plan.title, en: "" }, sourceSummary: plan.sourceNotes.join("；"), chinese: { title: plan.title, content, estimatedSeconds: seconds }, english: { title: "", content: "", estimatedSeconds: seconds, cefr: "A2-B1" }, versionOverlays: { zh: "", en: "" }, persistentOverlays: { zh: plan.coverTitle, en: "" }, materialHighlights: [] },
+      ...template.talkingHead, activeLanguage: language, aspectRatio: "9:16",
+      script: { title: { zh: language === "zh" ? plan.title : "", en: language === "en" ? plan.title : "" }, sourceSummary: plan.sourceNotes.join("；"), chinese: { title: language === "zh" ? plan.title : "", content: language === "zh" ? content : "", estimatedSeconds: seconds }, english: { title: language === "en" ? plan.title : "", content: language === "en" ? content : "", estimatedSeconds: seconds, cefr: "A2-B1" }, versionOverlays: { zh: "", en: "" }, persistentOverlays: { zh: language === "zh" ? plan.coverTitle : "", en: language === "en" ? plan.coverTitle : "" }, materialHighlights: [] },
       teleprompterText: content, teleprompterPos: { x: 50, y: 5 }, teleprompterFontSize: 32,
-      teleprompterOpacity: 0.85, autoScroll: false, scrollSpeed: 25,
+      teleprompterOpacity: 0.85, autoScroll: false, scrollSpeed: 8, prompterMode: plan.prompterMode ?? "full",
       overlayText: plan.coverTitle, showOverlay: true, overlayPosition: "top", overlayColor: "#FFDF4D", overlayFont: "sans-serif", overlayFontSize: 58, overlayWidth: 84, overlayShadow: true,
       brollAssets: assets, brollSize: 100, brollPosition: 50,
       directorModeEnabled: true, directorControlMode: "manual", directorPace: 2,
@@ -162,6 +182,13 @@ if (plan.mode === "talkinghead") {
     directorPlan: { version: 1, durationMs: atMs, actions, subtitleCues: [], autoStartOnRecording: false },
   };
 }
+// Validate before any deliverables are written.
+const validationDir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "onetake-validate-"));
+try {
+  const candidate = path.join(validationDir, "project.json");
+  fs.writeFileSync(candidate, JSON.stringify(project));
+  require("node:child_process").execFileSync(process.execPath, [path.join(__dirname, "validate-project.cjs"), candidate, "--production", ...(plan.mode === "talkinghead" ? ["--mobile"] : [])], { stdio: "pipe" });
+} finally { fs.rmSync(validationDir, { recursive: true, force: true }); }
 fs.mkdirSync(out, { recursive: true });
 for (const part of parts) {
   if (!part.sourceImage) continue;
@@ -177,6 +204,7 @@ fs.writeFileSync(path.join(out, "录制稿与分镜.md"), [
   `# ${plan.title}`, "", `观众：${plan.audience}`, `核心观点：${plan.corePoint}`, `参考口播：${duration} 秒。默认手动分段/切页；时长仅用于准备，不限制临场发挥。`,
   "", `封面大字：\n\n${plan.coverTitle}`, `\n封面小字：${plan.coverSubtitle}`,
   "", ...parts.map((p, i) => `## ${i + 1}. ${p.name || p.role}\n\n参考 ${p.seconds} 秒；镜头：${p.camera || "真人"}。\n\n${p.text}\n\n画面：${p.shot}${p.sourceImage ? `\n\n来源图：${p.sourceImage.file}；署名：${p.sourceImage.credit}；原文：${p.sourceImage.sourceUrl}。` : ""}${p.quote ? `\n\n金句：${p.quote}；黄字重点：${p.emphasis || "无"}。` : ""}`),
+  "", ...parts.filter(p => p.captions?.lines.length).map(p => `## ${p.name || p.role || p.id} · 字幕对照\n\n${p.captions.lines.map(line => `- ${line.text}${line.emphasis ? `（重点：${line.emphasis}）` : ""}\n  ${line.translation || "待补译文"}${line.translationEmphasis ? `（重点：${line.translationEmphasis}）` : ""}`).join("\n")}\n\n章节：${p.chapterTitle || "未填写"}；私用提纲：${p.promptNotes || "未填写"}。`),
   "", "## 录制前确认", "", "先通读并换成自己平时会说的词；只在确认过的地方使用第一人称经历。工程不会识别说到哪个词。手动停顿后继续，最后由本人停止。金句按意义段出现，不是自动逐字字幕。",
   "白板工程仅供网页白板导入；口播工程可供网页与当前手机口播导入。提词器不入成片。封面和发布词仍要在录后确认；白板发布词以及口播封面文案见配套文件。",
   "", "## 内容复核", "", ...(plan.review || []).map(r => `- ${r}`), "",
@@ -187,7 +215,7 @@ const escaped = JSON.stringify({ project, plan }).replace(/</g, "\\u003c");
 const htmlTitle = plan.title.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 fs.writeFileSync(path.join(out, "preview.html"), `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlTitle}</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#eef1f3;color:#17232d;font-family:Arial,"PingFang SC",sans-serif}main{max-width:1100px;margin:auto;padding:20px;display:grid;grid-template-columns:minmax(240px,400px) minmax(280px,1fr);gap:28px}#frame{position:relative;aspect-ratio:9/16;overflow:hidden;background:#fafaf7}#board{position:absolute;width:720px;height:1280px;transform-origin:0 0}.el{position:absolute;white-space:pre;line-height:1.25;letter-spacing:0}.camera{position:absolute;background:#d9e3e8;color:#325a70;display:grid;place-items:center}.full{inset:0}.split{left:0;right:0;bottom:0;height:50%}.pip{right:4%;bottom:4%;width:24%;aspect-ratio:1;border-radius:50%;font-size:12px}#source-image{position:absolute;left:0;bottom:0;width:100%;height:42%;object-fit:contain;background:#17232d}#quote{position:absolute;left:6%;right:6%;bottom:24%;text-align:center;white-space:pre-line;background:#17232d;color:white;padding:12px;font-size:22px}mark{color:#ffdf4d;background:none}button{font-size:22px;width:44px;height:40px;border:1px solid #9dadb6;background:white;border-radius:4px;cursor:pointer}button:disabled{opacity:.35}nav{display:flex;gap:12px;align-items:center}select{width:100%;padding:10px;font-size:16px;margin:16px 0}p{line-height:1.9}h1{font-size:24px}h2{font-size:20px}.note{font-size:14px;color:#52616b}@media(max-width:680px){main{grid-template-columns:1fr;max-width:430px;padding:12px}}</style>
-<main><section><div id="frame"><div id="board"></div><div id="camera" class="camera"></div><img id="source-image" alt="来源资料" hidden><div id="quote" hidden></div></div></section><section><h1 id="title"></h1><nav><button id="prev" aria-label="上一段">←</button><span id="count"></span><button id="next" aria-label="下一段">→</button></nav><select id="pages" aria-label="选择段落"></select><h2 id="name"></h2><p id="script"></p><p id="shot" class="note"></p><p class="note">分镜排练：不启用摄像头，不是实录成片。最终样式以 OneTake 内的预览为准。</p><a href="project.onetake.json" download>下载工程</a></section></main>
+<main><section><div id="frame"><div id="board"></div><div id="camera" class="camera"></div><img id="source-image" alt="来源资料" hidden><div id="quote" hidden></div></div></section><section><h1 id="title"></h1><nav><button id="prev" aria-label="上一段">←</button><span id="count"></span><button id="next" aria-label="下一段">→</button></nav><select id="pages" aria-label="选择段落"></select><h2 id="name"></h2><p id="script"></p><p id="shot" class="note"></p><p class="note">静态分镜排练：不启用摄像头，不模拟字幕时间轴。双语字幕见录制稿；最终显示以 OneTake 内预览为准。</p><a href="project.onetake.json" download>下载工程</a></section></main>
 <script>
 const data=${escaped};
 let i=0;

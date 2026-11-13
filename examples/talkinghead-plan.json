@@ -8,11 +8,50 @@
   "productMention": "none",
   "publication": {
     "description": "这是一个用于验证工程格式的合成示例，不是待发布的视频。",
-    "keywords": ["口播", "结构", "示例", "验证"]
+    "keywords": [
+      "口播",
+      "结构",
+      "示例",
+      "验证"
+    ]
   },
-  "sourceNotes": ["Synthetic example; no real person, result, or third-party asset."],
+  "sourceNotes": [
+    "Synthetic example; no real person, result, or third-party asset."
+  ],
   "segments": [
-    { "id": "intro", "role": "提问", "text": "有时候一个问题讲不清，不是因为内容少，而是开头没有说清楚问题是什么。", "seconds": 12, "shot": "真人镜头占位。" },
-    { "id": "answer", "role": "方法", "text": "先给观众一个具体的情境，再说自己的判断，最后让观众知道下一步能怎么做。", "seconds": 14, "shot": "真人镜头占位。", "quote": "先说问题，再说判断", "emphasis": "判断" }
-  ]
+    {
+      "id": "intro",
+      "role": "提问",
+      "text": "有时候一个问题讲不清，不是因为内容少，而是开头没有说清楚问题是什么。",
+      "seconds": 12,
+      "shot": "真人镜头占位。",
+      "promptNotes": "开口：想象第一次解释一个问题。\n具体场景 → 卡在哪里",
+      "chapterTitle": "从一个问题开始",
+      "captions": {
+        "mode": "key",
+        "lines": [
+          {
+            "text": "先讲清楚问题",
+            "emphasis": "问题",
+            "translation": "Make the problem clear first.",
+            "translationEmphasis": "problem",
+            "dwell": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "answer",
+      "role": "方法",
+      "text": "先给观众一个具体的情境，再说自己的判断，最后让观众知道下一步能怎么做。",
+      "seconds": 14,
+      "shot": "真人镜头占位。",
+      "quote": "先说问题，再说判断",
+      "emphasis": "判断",
+      "chapterTitle": "给出下一步",
+      "cueAtProgress": 0.4,
+      "cueDurationSeconds": 5
+    }
+  ],
+  "prompterMode": "outline"
 }

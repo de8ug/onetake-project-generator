@@ -1,9 +1,13 @@
 {
   "name": "onetake-project-generator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "Standalone Codex Skill and dependency-free OneTake project packager",
   "license": "MIT",
-  "engines": { "node": ">=20" },
-  "scripts": { "test": "node --test scripts/build-project.test.cjs" }
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test scripts/build-project.test.cjs"
+  }
 }

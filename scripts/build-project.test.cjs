@@ -101,3 +101,61 @@ test("whiteboard source page embeds a referenced image file", () => {
     assert(p.files[element.fileId].dataURL.startsWith("data:image/png;base64,"));
   }, true);
 });
+const { validateExtras, validatePublication } = require('./project-fields.cjs');
+test('caption boundaries and bilingual emphasis are enforced', () => {
+  const line = { text: 'a'.repeat(72), emphasis: 'a'.repeat(24), translation: 'b'.repeat(160), translationEmphasis: 'b'.repeat(48), dwell: 0.5 };
+  for (const mode of ['off', 'key', 'full']) validateExtras({ promptNotes: 'p'.repeat(300), chapterTitle: 'c'.repeat(24), captions: { mode, lines: Array(30).fill(line) } });
+  validateExtras({ captions: { mode: 'key', lines: [{ ...line, dwell: 2 }] } });
+  for (const change of [{ text: 'a'.repeat(73) }, { emphasis: 'a'.repeat(25) }, { translation: 'b'.repeat(161) }, { translationEmphasis: 'b'.repeat(49) }, { emphasis: 'z' }, { translationEmphasis: 'z' }, { dwell: 0.49 }, { dwell: 2.01 }, { dwell: NaN }]) {
+    assert.throws(() => validateExtras({ captions: { mode: 'key', lines: [{ ...line, ...change }] } }));
+  }
+  for (const bad of [{ promptNotes: 'p'.repeat(301) }, { chapterTitle: 'c'.repeat(25) }, { captions: { mode: 'auto', lines: [] } }, { captions: { mode: 'full', lines: Array(31).fill(line) } }]) assert.throws(() => validateExtras(bad));
+  for (const keywords of [['a','b','c','d','a'], ['a','b','c',''], ['a','b','c',1]]) assert.throws(() => validatePublication({ description: 'test', keywords }));
+});
+test('bilingual captions, private notes and delayed cues survive packaging and v4 copying', () => {
+  const example = JSON.parse(fs.readFileSync(path.join(__dirname, '../examples/talkinghead-plan.json'), 'utf8'));
+  run(example, ({ result, output }) => {
+    assert.equal(result.status, 0, result.stderr);
+    const p = importCheck(output, true);
+    const segment = p.talkingHead.directorPlan.segments[0];
+    for (const key of ['promptNotes', 'chapterTitle', 'captions']) assert.deepEqual(segment[key], example.segments[0][key]);
+    assert.equal(p.talkingHead.directorPlan.segments[1].cues[0].atProgress, 0.4);
+    p.futureExtension = { preserve: true };
+    p.talkingHead.customSetting = { preserve: true };
+    const input = path.join(output, 'existing.json');
+    fs.writeFileSync(input, JSON.stringify(p));
+    const copy = path.join(output, 'copy');
+    const result2 = spawnSync(process.execPath, [build, input, copy], { encoding: 'utf8' });
+    assert.equal(result2.status, 0, result2.stderr);
+    assert.deepEqual(fs.readFileSync(path.join(copy, 'project.onetake.json')), fs.readFileSync(input));
+    const repeat = spawnSync(process.execPath, [build, input, copy], { encoding: 'utf8' });
+    assert.notEqual(repeat.status, 0);
+  });
+});
+test('invalid caption input cannot produce a deliverable', () => {
+  run({ ...common, mode: 'talkinghead', segments: [{ id: 'intro', role: 'intro', text: 'Synthetic.', seconds: 10, shot: 'Placeholder', captions: { mode: 'key', lines: [{ text: 'x'.repeat(73) }] } }] }, ({ result, output }) => {
+    assert.notEqual(result.status, 0);
+    assert(!fs.existsSync(path.join(output, 'project.onetake.json')));
+  });
+});
+test('English active-language v4 validates against English full text', () => {
+  run({ ...common, mode: 'talkinghead', segments: [{ id: 'intro', role: 'intro', text: '合成示例。', seconds: 10, shot: 'Placeholder' }] }, ({ result, output }) => {
+    assert.equal(result.status, 0, result.stderr);
+    const p = importCheck(output, true);
+    p.talkingHead.activeLanguage = 'en';
+    p.talkingHead.directorPlan.segments[0].script.en = 'Synthetic example.';
+    p.talkingHead.script.english.content = p.talkingHead.teleprompterText = 'Synthetic example.';
+    fs.writeFileSync(path.join(output, 'project.onetake.json'), JSON.stringify(p));
+    importCheck(output, true);
+  });
+});
+test('English authored plan uses English narration and Chinese paired captions', () => {
+  run({ ...common, mode: 'talkinghead', language: 'en', segments: [{ id: 'one', role: 'Example', text: 'Start with one small question.', seconds: 12, shot: 'Presenter only.', chapterTitle: 'One question', promptNotes: 'Start small / one example', captions: { mode: 'key', lines: [{ text: 'Start with one question', emphasis: 'one question', translation: '先讲一个问题', translationEmphasis: '一个问题' }] } }] }, ({ result, output }) => {
+    assert.equal(result.status, 0, result.stderr);
+    const p = importCheck(output, true);
+    assert.equal(p.talkingHead.activeLanguage, 'en');
+    assert.equal(p.talkingHead.script.english.content, 'Start with one small question.');
+    assert.equal(p.talkingHead.directorPlan.segments[0].script.en, 'Start with one small question.');
+    assert(fs.readFileSync(path.join(output, '录制稿与分镜.md'), 'utf8').includes('先讲一个问题'));
+  });
+});
