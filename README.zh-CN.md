@@ -1,10 +1,12 @@
 # OneTake 工程生成 Skill
 
+[English](README.md) · 简体中文
+
 这是一个可独立安装的 Codex Skill：从观众真正关心的问题出发，准备可编辑的 OneTake 真人口播或白板工程。它不依赖 OneTake 源码、个人工程模板、服务器或模型 API Key。
 
 **先把想讲的事讲明白，再用 [OneTake](https://onetake.show) 录出来。** OneTake 提供口播、提词与白板等录制流程。更多功能正在测试和完善中，请以官网公布的可用状态为准；本 Skill 生成工程文件，并不保证某个线上部署版本已开放对应导入入口。
 
-Created by **浩哥AI实验室 (Hao’s AI Lab)** for audience-first, editable OneTake projects. Local packaging needs no additional model key.
+由 **浩哥AI实验室**制作：先写观众听得懂的内容，再生成可编辑的 OneTake 工程。本地打包无需额外配置模型密钥。
 
 ## 它适合做什么
 
